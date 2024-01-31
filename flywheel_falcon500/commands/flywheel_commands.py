@@ -7,7 +7,7 @@ import commands2
 from subsystems.flywheel_subsystem import FlywheelSubsystem
 
 
-class TestMoveFlywheel(commands2.Command):
+class MoveFlywheel(commands2.Command):
     def __init__(self, flywheel: FlywheelSubsystem) -> None:
         super().__init__()
         self._flywheel = flywheel

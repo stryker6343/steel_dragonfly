@@ -8,7 +8,7 @@ from phoenix6 import configs, controls, hardware
 from wpiutil import SendableBuilder
 
 
-class FlywheelSubsystem(Subsystem):
+class Falcon500FlywheelSubsystem(Subsystem):
     """
     A simple flywheel driven by a Falcon 500 motor.  Motion Magic is used to
     move the flywheel to the requested position using velocity control.
@@ -55,13 +55,17 @@ class FlywheelSubsystem(Subsystem):
         # Create a Motion Magic request, voltage output
         self.request = controls.MotionMagicVoltage(0)
 
-        # Create a simulation object
-        self.sim_state = self.talonfx.sim_state
-
+        # Create a moving window filter to for detecting when a move is complete
         self.median_velocity_filter = wpimath.filter.MedianFilter(256)
         self.update_median_velocity()
 
+    @property
+    def sim_state(self):
+        """The collection of simulation interface to the Falcon 500 motor."""
+        return self.talonfx.sim_state
+
     def update_median_velocity(self):
+        """Update the filtered median velocity value."""
         self.median_velocity = self.median_velocity_filter.calculate(
             float(self.talonfx.get_velocity().value) ** 2
         )
@@ -88,4 +92,4 @@ class FlywheelSubsystem(Subsystem):
     def move_to_position(self, position: float):
         """Move the flywheel to a specific position"""
         self.talonfx.set_control(self.request.with_position(position))
-        print(self.talonfx.get_device_enable())
+        print(f"Moving to position: {position}")
