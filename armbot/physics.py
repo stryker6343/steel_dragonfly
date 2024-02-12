@@ -18,6 +18,7 @@ import typing
 import wpilib
 import wpilib.simulation
 import wpimath.system.plant
+import wpimath.geometry
 from pyfrc.physics.core import PhysicsInterface
 
 if typing.TYPE_CHECKING:
@@ -37,6 +38,12 @@ class PhysicsEngine:
         """
 
         self.physics_controller = physics_controller
+        self.robot = robot
+        self.init_arm()
+        self.init_drive()
+
+    def init_arm(self):
+        """Initialize the arm simulation"""
 
         # The arm gearbox represents a gearbox containing two Vex 775pro motors.
         self.armGearbox = wpimath.system.plant.DCMotor.vex775Pro(2)
@@ -56,10 +63,10 @@ class PhysicsEngine:
             math.radians(0),
         )
         self.encoderSim = wpilib.simulation.EncoderSim(
-            robot.container.robot_arm.encoder
+            self.robot.container.robot_arm.encoder
         )
         self.motorSim = wpilib.simulation.PWMSim(
-            robot.container.robot_arm.motor.getChannel()
+            self.robot.container.robot_arm.motor.getChannel()
         )
 
         # Create a Mechanism2d display of an Arm
@@ -75,6 +82,15 @@ class PhysicsEngine:
         # Put Mechanism to SmartDashboard
         wpilib.SmartDashboard.putData("Arm Sim", self.mech2d)
 
+    def init_drive(self):
+        """Initialize the drivetrain simulation"""
+        self.drivetrainSystem = wpimath.system.plant.LinearSystemId.identifyDrivetrainSystem(1.98, 0.2, 1.5, 0.3)
+        self.drivetrainSim = wpilib.simulation.DifferentialDrivetrainSim(self.drivetrainSystem, wpimath.system.plant.DCMotor.CIM(2), 8, )
+
+        self.field = wpilib.Field2d()
+        wpilib.SmartDashboard.putData("Field", self.field)
+        self.field.setRobotPose(wpimath.geometry.Pose2d(1, 7, 0))
+
     def update_sim(self, now: float, tm_diff: float) -> None:
         """
         Called when the simulation parameters for the program need to be
@@ -84,7 +100,9 @@ class PhysicsEngine:
         :param tm_diff: The amount of time that has passed since the last
                         time that this function was called
         """
+        self.update_arm_sim(now, tm_diff)
 
+    def update_arm_sim(self, now: float, tm_diff: float) -> None:
         # First, we set our "inputs" (voltages)
         self.armSim.setInput(
             0, self.motorSim.getSpeed() * wpilib.RobotController.getInputVoltage()
