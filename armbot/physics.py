@@ -16,9 +16,14 @@ import math
 import typing
 
 import wpilib
-import wpilib.simulation
-import wpimath.system.plant
-import wpimath.geometry
+from wpilib.simulation import (
+    DifferentialDrivetrainSim,
+    EncoderSim,
+    PWMSim,
+    SingleJointedArmSim,
+)
+from wpimath.system.plant import DCMotor, LinearSystemId
+from wpimath.geometry import Pose2d
 from pyfrc.physics.core import PhysicsInterface
 
 if typing.TYPE_CHECKING:
@@ -46,28 +51,24 @@ class PhysicsEngine:
         """Initialize the arm simulation"""
 
         # The arm gearbox represents a gearbox containing two Vex 775pro motors.
-        self.armGearbox = wpimath.system.plant.DCMotor.vex775Pro(2)
+        self.armGearbox = DCMotor.vex775Pro(2)
 
         # Simulation classes help us simulate what's going on, including gravity.
         # This sim represents an arm with 2 775s, a 600:1 reduction, a mass of 5kg,
         # 30in overall arm length, range of motion in [-75, 255] degrees, and noise
         # with a standard deviation of 1 encoder tick.
-        self.armSim = wpilib.simulation.SingleJointedArmSim(
+        self.armSim = SingleJointedArmSim(
             self.armGearbox,
             600.0,
-            wpilib.simulation.SingleJointedArmSim.estimateMOI(0.762, 5),
+            SingleJointedArmSim.estimateMOI(0.762, 5),
             0.762,
             math.radians(-75),
             math.radians(255),
             True,
             math.radians(0),
         )
-        self.encoderSim = wpilib.simulation.EncoderSim(
-            self.robot.container.robot_arm.encoder
-        )
-        self.motorSim = wpilib.simulation.PWMSim(
-            self.robot.container.robot_arm.motor.getChannel()
-        )
+        self.armEncoderSim = EncoderSim(self.robot.container.robot_arm.encoder)
+        self.armMotorSim = PWMSim(self.robot.container.robot_arm.motor.getChannel())
 
         # Create a Mechanism2d display of an Arm
         self.mech2d = wpilib.Mechanism2d(60, 60)
@@ -84,12 +85,29 @@ class PhysicsEngine:
 
     def init_drive(self):
         """Initialize the drivetrain simulation"""
-        self.drivetrainSystem = wpimath.system.plant.LinearSystemId.identifyDrivetrainSystem(1.98, 0.2, 1.5, 0.3)
-        self.drivetrainSim = wpilib.simulation.DifferentialDrivetrainSim(self.drivetrainSystem, wpimath.system.plant.DCMotor.CIM(2), 8, )
 
+        # Create simulated encoders
+        self.leftEncoderSim = EncoderSim(self.robot.container.robot_drive.left_encoder)
+        self.rightEncoderSim = EncoderSim(
+            self.robot.container.robot_drive.right_encoder
+        )
+
+        # Create a simulation of the drive train mechanism
+        self.drivetrainSystem = LinearSystemId.identifyDrivetrainSystem(
+            1.98, 0.2, 1.5, 0.3
+        )
+        self.drivetrainSim = DifferentialDrivetrainSim(
+            self.drivetrainSystem,
+            DCMotor.CIM(2),
+            8,
+        )
+
+        # Setup a display of the Field and sent it to the dashboard
         self.field = wpilib.Field2d()
         wpilib.SmartDashboard.putData("Field", self.field)
-        self.field.setRobotPose(wpimath.geometry.Pose2d(1, 7, 0))
+
+        # Need to pose the robot in a useful position
+        self.field.setRobotPose(Pose2d(1, 7, 0))
 
     def update_sim(self, now: float, tm_diff: float) -> None:
         """
@@ -101,11 +119,12 @@ class PhysicsEngine:
                         time that this function was called
         """
         self.update_arm_sim(now, tm_diff)
+        self.update_drivetrain_sim(now, tm_diff)
 
     def update_arm_sim(self, now: float, tm_diff: float) -> None:
         # First, we set our "inputs" (voltages)
         self.armSim.setInput(
-            0, self.motorSim.getSpeed() * wpilib.RobotController.getInputVoltage()
+            0, self.armMotorSim.getSpeed() * wpilib.RobotController.getInputVoltage()
         )
 
         # Next, we update it
@@ -113,7 +132,7 @@ class PhysicsEngine:
 
         # Finally, we set our simulated encoder's readings and simulated battery
         # voltage
-        self.encoderSim.setDistance(self.armSim.getAngle())
+        self.armEncoderSim.setDistance(self.armSim.getAngle())
         # SimBattery estimates loaded battery voltage
         # wpilib.simulation.RoboRioSim.setVInVoltage(
         #     wpilib.simulation.BatterySim
@@ -122,3 +141,27 @@ class PhysicsEngine:
         # Update the mechanism arm angle based on the simulated arm angle
         # -> setAngle takes degrees, getAngle returns radians... >_>
         self.arm.setAngle(math.degrees(self.armSim.getAngle()))
+
+    def update_drivetrain_sim(self, now: float, tm_diff: float) -> None:
+        # To update our simulation, we set motor voltage inputs, update the
+        # simulation, and write the simulated positions and velocities to our
+        # simulated encoder and gyro. We negate the right side so that positive
+        # voltages make the right side move forward.
+
+        # First, we set our "inputs" (voltages)
+        self.drivetrainSim.setInput(
+            self.robot.container.robot_drive.left_motors.get()
+            * wpilib.RobotController.getInputVoltage(),
+            self.robot.container.robot_drive.right_motors.get()
+            * wpilib.RobotController.getInputVoltage(),
+        )
+
+        # Next, we update it
+        self.drivetrainSim.update(tm_diff)
+
+        # Finally, we set our simulated encoder's readings and simulated battery
+        # voltage
+        self.leftEncoderSim.setDistance(self.drivetrainSim.getLeftPosition())
+        self.leftEncoderSim.setRate(self.drivetrainSim.getLeftVelocity())
+        self.rightEncoderSim.setDistance(self.drivetrainSim.getRightPosition())
+        self.rightEncoderSim.setRate(self.drivetrainSim.getRightVelocity())
